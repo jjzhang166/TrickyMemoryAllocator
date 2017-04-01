@@ -36,14 +36,7 @@ GreedyMemManager::~GreedyMemManager()
 
 void * GreedyMemManager::malloc(int len)
 {
-	totalMallocCount += 1;
 
-	if (totalMallocCount > MAX_TOTAL_REUSE_COUNT)
-	{
-		totalMallocCount = totalMallocCount / 2;
-		blockReuseCount = blockReuseCount / 2;
-
-	}
 
 	LenAndBlocks*  lenAndBLocks = getLenAndBLocks(len);
 
@@ -55,6 +48,16 @@ void * GreedyMemManager::malloc(int len)
 	}
 	else
 	{
+
+		totalMallocCount += 1;
+
+		if (totalMallocCount > MAX_TOTAL_REUSE_COUNT)
+		{
+			totalMallocCount = totalMallocCount / 2;
+			blockReuseCount = blockReuseCount / 2;
+
+		}
+
 		csLock.lock();
 		SimpleList * readyBlocks = &(lenAndBLocks->blockArray);
 		//GREEDY_READY_BLOCKS * usingBlocks = usingSize2BlockMaps.find(blockLen)->second;
@@ -258,39 +261,9 @@ LenAndBlocks* GreedyMemManager::getLenAndBLocks(unsigned int mallocSize)
 
 	return ret;;
 }
-//
-//unsigned int GreedyMemManager::getManageSize(unsigned int mallocSize)
-//{
-//	unsigned int ret = -1;
-//
-//	if (mallocSize < GREEDY_MEM_MANAGE_MIN_BLOCK_SIZE || mallocSize > GREEDY_MEM_MANAGE_MAX_BLOCK_SIZE)
-//	{
-//		return ret;
-//	}
-//
-//
-//	for (int i = 0; i < MANAGER_MEM_SIZES_COUNT; i++)
-//	{
-//		if (manageSizes[i].len <= 0)
-//		{
-//			break;
-//		}
-//		else if (manageSizes[i].len < mallocSize)
-//		{
-//			//coninue
-//		}
-//		else
-//		{
-//			ret = manageSizes[i].len;
-//			break;
-//		}
-//	}
-//
-//
-//	return ret;;
-//}
 
-float GreedyMemManager::reuseBlockHitRate()
+
+double GreedyMemManager::reuseBlockHitRate()
 {
 	long totalMallocCountTemp = totalMallocCount;
 

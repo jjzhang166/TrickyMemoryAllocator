@@ -40,7 +40,7 @@ struct CriticalSection
 
 #define GREEDY_MALLOC_ALIGN 16 //内存对齐
 
-const unsigned int GREEDY_MEM_MANAGE_MIN_BLOCK_SIZE = 1; //最小化的内存块，如果比这个小则不缓存，直接由操作系统申请和释放
+const unsigned int GREEDY_MEM_MANAGE_MIN_BLOCK_SIZE = 64; //最小化的内存块，如果比这个小则不缓存，直接由操作系统申请和释放
 
 const unsigned int GREEDY_MEM_MANAGE_MAX_BLOCK_SIZE = 1024 * 1024 * 1024 * 1; //最大化的内存块，如果比这个大则不缓存，直接由操作系统申请和释放
 
@@ -315,7 +315,7 @@ public:
 
 	//unsigned int getManageSize(unsigned int mallocSize);
 
-	float reuseBlockHitRate();
+	double reuseBlockHitRate();
 
 	void cleanReuseBlockHitRateData();
 
