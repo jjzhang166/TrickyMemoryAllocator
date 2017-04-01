@@ -92,6 +92,7 @@ typedef struct SimpleList
 		{
 			return;
 		}
+
 		
 		SimpleListNode * nodePre = node->pre;
 
@@ -135,6 +136,10 @@ typedef struct SimpleList
 
 	SimpleListNode * push_back_node(SimpleListNode * node)
 	{
+		node->pre = NULL;
+		node->next = NULL;
+
+
 		if (len == 0)
 		{
 			front = node;
@@ -158,6 +163,10 @@ typedef struct SimpleList
 
 	SimpleListNode * push_front_node(SimpleListNode * node)
 	{
+
+		node->pre = NULL;
+		node->next = NULL;
+
 		if (len == 0)
 		{
 			front = node;
@@ -199,17 +208,18 @@ typedef struct SimpleList
 		{
 			return NULL;
 		}
-
+		else if (len == 1)
+		{
+			node = end;
+			end = front = NULL;
+		}
 		else
 		{
 			node = end;			
 			end = end->pre;
-			if (node == front)
-			{
-				front = NULL;
-			}
-			len--;
+			end->next = NULL;
 		}
+		len--;
 		node->pre = NULL;
 
 		node->next = NULL;
@@ -241,20 +251,24 @@ typedef struct SimpleList
 		{
 			return NULL;
 		}
+		else if (len == 1)
+		{
+			node = front;
 
+			front = end = NULL;
+		}
 		else
 		{
 			node = front;
-			front = front->next;
-			if (node == end)
-			{
-				end = NULL;
-			}
-			len--;
-		}
-		
-		node->pre = NULL;
 
+			front = front->next;
+	
+			front->pre = NULL;
+		}
+
+		len--;
+
+		node->pre = NULL;
 		node->next = NULL;
 
 		return node;
