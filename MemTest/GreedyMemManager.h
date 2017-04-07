@@ -1,13 +1,8 @@
-#pragma once
 
-#include <list>
-#include <map>
-#include <hash_map>
-
-using namespace std;
+#ifndef __GREEDY_MEM_MANAGER_H__
+#define __GREEDY_MEM_MANAGER_H__
 
 
-#include <windows.h>
 
 #include "BaseMemManager.h"
 
@@ -22,6 +17,12 @@ if (obj)\
 }\
 }
 
+
+
+#if WIN32
+#include <windows.h>
+
+typedef unsigned int tick_time;
 
 struct CriticalSection
 {
@@ -38,6 +39,35 @@ struct CriticalSection
 };
 
 
+#elif linux
+
+#include <pthread.h>
+
+typedef unsigned long tick_time;
+
+tick_time GetTickCount();
+
+
+struct CriticalSection
+{
+	CriticalSection()
+	{
+		pthread_mutex_init(&m_mutex, NULL);
+	}
+	~CriticalSection() { pthread_mutex_destroy(&m_mutex); }
+	void lock() { pthread_mutex_lock(&m_mutex); }
+	void unlock() { pthread_mutex_unlock(&m_mutex); }
+	//bool trylock() { return TryEnterCriticalSection(&cs) != 0; }
+
+	pthread_mutex_t m_mutex;
+};
+
+#endif
+
+
+
+
+
 #define GREEDY_MALLOC_ALIGN 16 //内存对齐
 
 const unsigned int GREEDY_MEM_MANAGE_MIN_BLOCK_SIZE = 64; //最小化的内存块，如果比这个小则不缓存，直接由操作系统申请和释放
@@ -49,55 +79,69 @@ const unsigned int GREEDY_KEEP_IDLE_MEM_SECONDS = 15; //30秒没有被重用的内存将归
 
 const unsigned int GREEDY_CLEAN_IDLE_MEM_TIMER_INTERVAL = 2000;//单位毫秒,清理空闲内存定时器的时长
 
-#define MAX_TOTAL_REUSE_COUNT 200000//统计命中率的时候，如果次数打到了此限制，则次数减半。
+//#define MAX_TOTAL_REUSE_COUNT  2147438647l //统计命中率的时候，如果次数打到了此限制，则次数减半。
 
 struct GreedyMemBlock;
 
-//typedef list<GreedyMemBlock *> GREEDY_READY_BLOCKS;
-//typedef list<GreedyMemBlock *>::iterator GREEDY_READY_BLOCKS_ITER;
-//typedef list<GreedyMemBlock *>::reverse_iterator GREEDY_READY_BLOCKS_RITER;
-//
-//typedef hash_map<unsigned int, GREEDY_READY_BLOCKS *> GREEDY_READY_SIZE_BLOCK_MAP;
-//typedef hash_map<unsigned int, GREEDY_READY_BLOCKS *>::iterator GREEDY_READY_SIZE_BLOCK_MAP_ITER;
-//typedef hash_map<unsigned int, GREEDY_READY_BLOCKS *>::value_type GREEDY_READY_SIZE_BLOCK_MAP_VALUE_TYPE;
 
+//自己实现的简单双向链表节点（比stl块很多）
 typedef struct SimpleListNode
 {
-
 	SimpleListNode(void * data)
 	{
 		this->next = NULL;
 		this->pre = NULL;
 		this->data = data;
 	}
-	SimpleListNode * next = NULL;
 
-	SimpleListNode * pre = NULL;
+	SimpleListNode()
+	{
+		next = NULL;
+		pre = NULL;
+		data = NULL;
+	}
 
-	void * data = NULL;
+	SimpleListNode * next;
+
+	SimpleListNode * pre;
+
+	void * data;
 
 }SimpleListNode;
 
+
+//自己实现的简单双向链表（比stl块很多）
 typedef struct SimpleList
 {
-	int len = 0;
+	int len;
 
-	SimpleListNode * front = NULL;
+	SimpleListNode * front;
 
-	SimpleListNode * end = NULL;
+	SimpleListNode * end;
+
+	SimpleList()
+	{
+		len = 0;
+		front = NULL;
+		end = NULL;
+	};
+
+
 
 	void erase(SimpleListNode * node)
 	{
-		if (node == NULL)
+        SimpleListNode * nodePre = node->pre;
+        
+        
+        SimpleListNode * nodeNext = node->next;
+
+        if (node == NULL)
 		{
 			return;
 		}
 
 		
-		SimpleListNode * nodePre = node->pre;
-
-
-		SimpleListNode * nodeNext = node->next;
+	
 
 		node->pre = NULL;
 
@@ -159,7 +203,7 @@ typedef struct SimpleList
 	SimpleListNode * push_front_data(void * data)
 	{
 		return push_front_node(new SimpleListNode(data));
-	}
+	};
 
 	SimpleListNode * push_front_node(SimpleListNode * node)
 	{
@@ -182,9 +226,38 @@ typedef struct SimpleList
 		len++;
 
 		return node;
-	};
+    };
 
-	(void *)pop_back_data()
+
+    SimpleListNode *pop_back_node()
+    {
+        
+        SimpleListNode * node;
+        
+        if (len == 0)
+        {
+            return NULL;
+        }
+        else if (len == 1)
+        {
+            node = end;
+            end = front = NULL;
+        }
+        else
+        {
+            node = end;
+            end = end->pre;
+            end->next = NULL;
+        }
+        len--;
+        node->pre = NULL;
+        
+        node->next = NULL;
+        
+        return node;
+    };
+    
+    void * pop_back_data()
 	{
 		SimpleListNode * node = pop_back_node();
 		if (node == NULL)
@@ -197,38 +270,46 @@ typedef struct SimpleList
 			SafeDeleteObj(node);
 			return data;
 		}
-	}
-
-	(SimpleListNode *)pop_back_node()
-	{
-
-		SimpleListNode * node;
-
-		if (len == 0)
-		{
-			return NULL;
-		}
-		else if (len == 1)
-		{
-			node = end;
-			end = front = NULL;
-		}
-		else
-		{
-			node = end;			
-			end = end->pre;
-			end->next = NULL;
-		}
-		len--;
-		node->pre = NULL;
-
-		node->next = NULL;
-
-		return node;
 	};
 
-	(void *)pop_front_data()
-	{
+
+
+    SimpleListNode * pop_front_node()
+    {
+        
+        SimpleListNode * node;
+        
+        if (len == 0)
+        {
+            return NULL;
+        }
+        else if (len == 1)
+        {
+            node = front;
+            
+            front = end = NULL;
+        }
+        else
+        {
+            node = front;
+            
+            front = front->next;
+            
+            front->pre = NULL;
+        }
+        
+        len--;
+        
+        node->pre = NULL;
+        node->next = NULL;
+        
+        return node;
+    };
+    
+    
+    void * pop_front_data()
+    {
+        
 		SimpleListNode * node = pop_front_node();
 		if (node == NULL)
 		{
@@ -240,45 +321,16 @@ typedef struct SimpleList
 			SafeDeleteObj(node);
 			return data;
 		}
-	}
-
-	(SimpleListNode *)pop_front_node()
-	{
-
-		SimpleListNode * node;
-
-		if (len == 0)
-		{
-			return NULL;
-		}
-		else if (len == 1)
-		{
-			node = front;
-
-			front = end = NULL;
-		}
-		else
-		{
-			node = front;
-
-			front = front->next;
-	
-			front->pre = NULL;
-		}
-
-		len--;
-
-		node->pre = NULL;
-		node->next = NULL;
-
-		return node;
 	};
 
+	
 }SimpleList;
 
+
+//内存块
 typedef struct GreedyMemBlock
 {
-	GreedyMemBlock(unsigned int lastReadyTime, void * p, unsigned int len) :lastReadyTime(lastReadyTime), p(p), len(len){
+	GreedyMemBlock(unsigned int lastReadyTime, void * p, int lenIndex) :lastReadyTime(lastReadyTime), p(p), lenIndex(lenIndex){
 		nodeInReadyArray = new SimpleListNode(this);
 	};
 
@@ -288,11 +340,12 @@ typedef struct GreedyMemBlock
 		byte* udata = (byte *)p - 1 - sizeof(GreedyMemBlock *);
 	    ::free(udata);
 	};
-	unsigned int lastReadyTime;
+	//最后归还时间，超过限度没有被重用将会被回收
+	tick_time lastReadyTime;
 
 	void * p;
 
-	unsigned int len;
+	int lenIndex;
 
 	SimpleListNode * nodeInReadyArray;
 
@@ -325,24 +378,32 @@ public:
 
 	void onCleanTimerFired(); //清理多余的长时间没有被重用的内存
 
+	int getLenIndex(unsigned int mallocSize);
+
 	LenAndBlocks* getLenAndBLocks(unsigned int mallocSize);
 
-	//unsigned int getManageSize(unsigned int mallocSize);
+	//double reuseBlockHitRate();
 
-	double reuseBlockHitRate();
-
-	void cleanReuseBlockHitRateData();
+	//void cleanReuseBlockHitRateData();
 
 	CriticalSection csLock;
 
+
+
+
+	//long totalMallocCount;
+
+	//long blockReuseCount;
+
+#if WIN32
 	MMRESULT timer_id;
+#endif
 
+#if linux
+	pthread_t timer_id;
 
-	long totalMallocCount = 0;
-
-	long blockReuseCount = 0;
-
-
+	void sleepAndFreeUnreusedMemory();
+#endif
 
 private:
 
@@ -350,13 +411,10 @@ private:
 
 	LenAndBlocks manageSizes[MANAGER_MEM_SIZES_COUNT];
 
-	//GREEDY_READY_SIZE_BLOCK_MAP readySize2BlockMaps;
-
-	//GREEDY_READY_SIZE_BLOCK_MAP usingSize2BlockMaps;
-
-	 //SimpleList allReadyBlockes;
 
 
 };
 
 extern GreedyMemManager gGreedyMemManager;
+
+#endif

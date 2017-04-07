@@ -1,4 +1,6 @@
-#pragma once
+#ifndef __STD_MEM_MANAGER_H__
+#define __STD_MEM_MANAGER_H__
+
 #include "BaseMemManager.h"
 class StdMemManager :
 	public BaseMemManager
@@ -11,5 +13,9 @@ public:
 	virtual void free(void * p);
 
 };
+
+#endif
+
+
 
 

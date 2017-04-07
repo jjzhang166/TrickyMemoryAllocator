@@ -5,13 +5,13 @@
 #include "StdMemManager.h"
 #include "GreedyMemManager.h"
 
-#define TEST_TIMES 100000 //test 10000 times
+#define TEST_TIMES 10000 //test 10000 times
 
 StdMemManager stdMemManager;
 
 void test(unsigned long begin, unsigned long  end, unsigned long times = TEST_TIMES)
 {
-	gGreedyMemManager.cleanReuseBlockHitRateData();
+	//gGreedyMemManager.cleanReuseBlockHitRateData();
 
 	unsigned long* size = new unsigned long[times];
 
@@ -51,10 +51,10 @@ void test(unsigned long begin, unsigned long  end, unsigned long times = TEST_TI
 	long greedyTime1 = GetTickCount() - start2;
 
 
-	printf("random bytes length begin£º%ld, end:%ld, test times:%ld, system api cost£º%ld, greedyMemory cost:%ld,totalMallocCount:%ld, blockReuseCount:%ld, call system malloc count:%ld\n", begin, end, times, stdTime, greedyTime1, gGreedyMemManager.totalMallocCount, gGreedyMemManager.blockReuseCount, gGreedyMemManager.totalMallocCount - gGreedyMemManager.blockReuseCount);
+	printf("random bytes length begin£º%ld, end:%ld, test times:%ld, system api cost£º%ld ms, greedyMemory cost:%ld ms\n", begin, end, times, stdTime, greedyTime1);
 
 	delete[] size;
-	gGreedyMemManager.cleanReuseBlockHitRateData();
+	//gGreedyMemManager.cleanReuseBlockHitRateData();
 
 
 	//sleep waite greedyMemoryManager release all the long time not used memory

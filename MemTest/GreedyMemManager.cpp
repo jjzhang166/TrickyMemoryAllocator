@@ -1,34 +1,72 @@
 #include "stdafx.h"
 #include "GreedyMemManager.h"
 
-#pragma comment(lib,"Winmm.lib")  
-
 GreedyMemManager gGreedyMemManager;
 
-template<typename T> inline T* alignPtr(T* ptr, size_t n = sizeof(T))
+#if linux
+#include <sys/time.h>
+
+tick_time GetTickCount()
 {
-	return (T*)(((size_t)ptr + n - 1) & -n);
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+
 }
 
-void WINAPI onGreadyCleanIdleMemTimerFired(UINT wTimerID, UINT msg, DWORD dwUser, DWORD dwl, DWORD dw2)
+void * clearMemDataThread(void * arg)
 {
+    GreedyMemManager * manager = (GreedyMemManager *)arg;
+    manager->sleepAndFreeUnreusedMemory();
+    return NULL;
+}
 
+#endif
+
+
+#if WIN32
+void onGreadyCleanIdleMemTimerFired(UINT wTimerID, UINT msg, DWORD dwUser, DWORD dwl, DWORD dw2)
+{
 
 	gGreedyMemManager.onCleanTimerFired();
+
 }
+#endif
 
 
 GreedyMemManager::GreedyMemManager()
 {
+    //totalMallocCount = 0;
+    //
+    //blockReuseCount = 0;
 	initManageSizes();
-
+#if WIN32
 	timer_id = timeSetEvent(GREEDY_CLEAN_IDLE_MEM_TIMER_INTERVAL, 1, (LPTIMECALLBACK)onGreadyCleanIdleMemTimerFired, DWORD(this), TIME_PERIODIC);
+#endif
 
+#if linux
+
+	if (pthread_create(&timer_id, NULL, clearMemDataThread, this) != 0)
+	{
+		printf("create  AnalysisDataThread failed\n");
+	}
+
+#endif
 }
 
 
 GreedyMemManager::~GreedyMemManager()
 {
+#if WIN32
+	timeKillEvent(timer_id);
+#endif
+
+#if linux
+
+	//todo 如何释放定时器线程
+	pthread_cancel(timer_id);
+
+#endif
 }
 
 
@@ -38,9 +76,9 @@ void * GreedyMemManager::malloc(int len)
 {
 
 
-	LenAndBlocks*  lenAndBLocks = getLenAndBLocks(len);
-
-	if (lenAndBLocks == NULL)
+	//LenAndBlocks*  lenAndBLocks = getLenAndBLocks(len);
+	int lenIndex = getLenIndex(len);
+	if (lenIndex < 0)
 	{
 		byte* udata = (byte*)::malloc(len + 1);
 		udata[0] = 0;
@@ -49,15 +87,16 @@ void * GreedyMemManager::malloc(int len)
 	else
 	{
 
-		totalMallocCount += 1;
+		//totalMallocCount += 1;
 
-		if (totalMallocCount > MAX_TOTAL_REUSE_COUNT)
-		{
-			totalMallocCount = totalMallocCount / 2;
-			blockReuseCount = blockReuseCount / 2;
+		//if (totalMallocCount > MAX_TOTAL_REUSE_COUNT)
+		//{
+		//	totalMallocCount = totalMallocCount / 2;
+		//	blockReuseCount = (blockReuseCount - 1) / 2;
 
-		}
+		//}
 
+		LenAndBlocks*  lenAndBLocks = &(manageSizes[lenIndex]);
 		csLock.lock();
 		SimpleList * readyBlocks = &(lenAndBLocks->blockArray);
 		//GREEDY_READY_BLOCKS * usingBlocks = usingSize2BlockMaps.find(blockLen)->second;
@@ -65,7 +104,7 @@ void * GreedyMemManager::malloc(int len)
 
 		if (readyBlocks->len > 0)
 		{
-			blockReuseCount = blockReuseCount + 1;
+	/*		blockReuseCount = blockReuseCount + 1;*/
 
 			GreedyMemBlock * block = (GreedyMemBlock *)readyBlocks->pop_front_node()->data;
 			//usingBlocks->push_back(block);
@@ -80,10 +119,10 @@ void * GreedyMemManager::malloc(int len)
 			byte* udata = (byte*)::malloc(lenAndBLocks->len + 1 + sizeof(GreedyMemBlock *));
 			byte* adata = udata + 1 + sizeof(GreedyMemBlock *);
 			adata[-1] = 1;
-			GreedyMemBlock *block = new GreedyMemBlock(-1, adata, lenAndBLocks->len);
+			GreedyMemBlock *block = new GreedyMemBlock(-1, adata, lenIndex);
 
 			//SimpleListNode * nodeInAllReady = new SimpleListNode(block);  block->nodeInAllReady = nodeInAllReady;
-
+//csLock
 
 			//usingBlocks->push_back(block);
 			((GreedyMemBlock **)udata)[0] = block;
@@ -114,18 +153,9 @@ void GreedyMemManager::free(void * p)
 		block->lastReadyTime = GetTickCount() / 1000; //当前秒数。
 		csLock.lock();
 
-		LenAndBlocks*  lenAndBLocks = getLenAndBLocks(block->len);
 
-		//GREEDY_READY_BLOCKS * usingBlocks = usingSize2BlockMaps.find(block->len)->second;
-
-		//for (GREEDY_READY_BLOCKS_ITER usingIter = usingBlocks->begin(); usingIter != usingBlocks->end(); usingIter++)
-		//{
-		//	if ((*usingIter) == block)
-		//	{
-		//		usingBlocks->erase(usingIter);
-		//		break;
-		//	}
-		//}
+		LenAndBlocks*  lenAndBLocks = &(manageSizes[block->lenIndex]);
+	
 		lenAndBLocks->blockArray.push_back_node(block->nodeInReadyArray);
 
 		csLock.unlock();
@@ -135,101 +165,100 @@ void GreedyMemManager::free(void * p)
 
 }
 
+#if linux
+void GreedyMemManager::sleepAndFreeUnreusedMemory()
+{
+
+	while (true)
+	{
+
+		sleep(GREEDY_CLEAN_IDLE_MEM_TIMER_INTERVAL / 1000);
+        this->onCleanTimerFired();
+	}
+
+};
+
+#endif
+
 void GreedyMemManager::onCleanTimerFired()//清理多余的长时间没有被重用的内存
 {
-	unsigned int now = GetTickCount() / 1000;
-	if (now <= GREEDY_KEEP_IDLE_MEM_SECONDS)
-	{
-		//LOG_INFO(_T("now < %d seconds, no need clean idle blocks this time "), GREEDY_KEEP_IDLE_MEM_SECONDS);
-		return;//no need clean
-	}
-	else
-	{
+	tick_time now = GetTickCount() / 1000;
+
 		
-		unsigned int cleanTimeSecond = now - GREEDY_KEEP_IDLE_MEM_SECONDS;
-		csLock.lock();
+	unsigned int cleanTimeSecond = now - GREEDY_KEEP_IDLE_MEM_SECONDS;
+	csLock.lock();
 
-		for (int i = 0; i < MANAGER_MEM_SIZES_COUNT; i++)
+	for (int i = 0; i < MANAGER_MEM_SIZES_COUNT; i++)
+	{
+		if (manageSizes[i].len <= 0)
 		{
-			if (manageSizes[i].len <= 0)
-			{
-				break;
-			}
+			break;
+		}
 	
-			else
+		else
+		{
+			LenAndBlocks & lenAndBlocks = manageSizes[i];
+			if (lenAndBlocks.blockArray.len > 0)
 			{
-				LenAndBlocks & lenAndBlocks = manageSizes[i];
-				if (lenAndBlocks.blockArray.len > 0)
+				SimpleList & blockArrayTemp = lenAndBlocks.blockArray;
+
+				SimpleListNode * nodeTemp = blockArrayTemp.end;
+				while (nodeTemp != NULL)
 				{
-					SimpleList & blockArrayTemp = lenAndBlocks.blockArray;
-
-					SimpleListNode * nodeTemp = blockArrayTemp.end;
-					while (nodeTemp != NULL)
+					SimpleListNode * nodePreTemp = nodeTemp->pre;
+					GreedyMemBlock * block = (GreedyMemBlock *)nodeTemp->data;
+					if (block->lastReadyTime <= cleanTimeSecond)
 					{
-						SimpleListNode * nodePreTemp = nodeTemp->pre;
-						GreedyMemBlock * block = (GreedyMemBlock *)nodeTemp->data;
-						if (block->lastReadyTime <= cleanTimeSecond)
-						{
-							blockArrayTemp.erase(nodeTemp);
-							SafeDeleteObj(block);
-						}
-						else
-						{
-							break;
-						}
-
-						nodeTemp = nodePreTemp;
-
+						blockArrayTemp.erase(nodeTemp);
+						SafeDeleteObj(block);
 					}
+					else
+					{
+						break;
+					}
+
+					nodeTemp = nodePreTemp;
+
 				}
 			}
 		}
+	
 
 
 
-		//for (GREEDY_READY_BLOCKS_ITER iter = allReadyBlockes.begin(); iter != allReadyBlockes.end(); )
-		//{
-		//	if ((*iter)->lastReadyTime <= cleanTimeSecond)
-		//	{
-		//		GREEDY_READY_BLOCKS_ITER iterNext = ++iter;
-		//		--iter;
 
-		//		GreedyMemBlock * block = *iter;
-
-		//		allReadyBlockes.erase(iter);
-
-		//		GREEDY_READY_BLOCKS * readyBlocks = &(getLenAndBLocks(block->len)->blockArray);
-		//		//GREEDY_READY_BLOCKS * usingBlocks = usingSize2BlockMaps.find(block->len)->second;
-
-		//		for (GREEDY_READY_BLOCKS_ITER iter2 = readyBlocks->begin(); iter2 != readyBlocks->end(); )
-		//		{
-		//			GREEDY_READY_BLOCKS_ITER iter2Next = ++iter2;
-		//			--iter2;
-		//			if ((*iter2) == block)
-		//			{
-		//				readyBlocks->erase(iter2);
-		//				break;
-		//			}
-
-		//			iter2 = iter2Next;
-		//		}
-		//
-
-		//		iter = iterNext;
-		//		//LOG_INFO(_T("do release one with len:%ld, current idle array size:%d,using array size:%d, total idle array size:%d"), block->len, readyBlocks->size(), usingBlocks->size(), allReadyBlockes.size());
-		//		SafeDeleteObj(block);
-
-		//	}
-		//	else
-		//	{
-
-		//		break;
-		//	}
-
-		//}
-
-		csLock.unlock();
 	}
+
+	csLock.unlock();
+}
+
+int GreedyMemManager::getLenIndex(unsigned int mallocSize)
+{
+	if (mallocSize < GREEDY_MEM_MANAGE_MIN_BLOCK_SIZE || mallocSize > GREEDY_MEM_MANAGE_MAX_BLOCK_SIZE)
+	{
+		return -1;
+	}
+
+	int ret = -1;
+	for (int i = 0; i < MANAGER_MEM_SIZES_COUNT; i++)
+	{
+		if (manageSizes[i].len <= 0)
+		{
+			break;
+		}
+		else if (manageSizes[i].len < mallocSize)
+		{
+			//coninue
+		}
+		else
+		{
+
+			ret = i;
+			break;
+		}
+	}
+
+	return ret;;
 }
 
 LenAndBlocks* GreedyMemManager::getLenAndBLocks(unsigned int mallocSize)
@@ -262,30 +291,30 @@ LenAndBlocks* GreedyMemManager::getLenAndBLocks(unsigned int mallocSize)
 	return ret;;
 }
 
-
-double GreedyMemManager::reuseBlockHitRate()
-{
-	long totalMallocCountTemp = totalMallocCount;
-
-	long blockReuseCountTemp = blockReuseCount;
-
-	if (totalMallocCount == 0)
-	{
-		return 0.0;
-	}
-	else
-	{
-		return blockReuseCountTemp*1.0 / totalMallocCountTemp;
-	}
-}
-
-
-void GreedyMemManager::cleanReuseBlockHitRateData()
-{
-	totalMallocCount = 0;
-
-	blockReuseCount = 0;
-}
+//
+//double GreedyMemManager::reuseBlockHitRate()
+//{
+//	long totalMallocCountTemp = totalMallocCount;
+//
+//	long blockReuseCountTemp = blockReuseCount;
+//
+//	if (totalMallocCount == 0)
+//	{
+//		return 0.0;
+//	}
+//	else
+//	{
+//		return blockReuseCountTemp*1.0 / totalMallocCountTemp;
+//	}
+//}
+//
+//
+//void GreedyMemManager::cleanReuseBlockHitRateData()
+//{
+//	totalMallocCount = 0;
+//
+//	blockReuseCount = 0;
+//}
 
 void GreedyMemManager::initManageSizes()
 {
